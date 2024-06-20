@@ -93,8 +93,8 @@ class Trainer:
     @functools.partial(jax.pmap, axis_name='devices', static_broadcasted_argnums=(0,))
     def train_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, state.step)
-        grad_fn = jax.value_and_grad(self.loss_metric_fn, has_aux=True)
-        (loss, lmd), grads = grad_fn(state.params, state.apply_fn, sample, False, prng_key)
+        grad_fn = jax.jacrev(self.loss_metric_fn, has_aux=True)
+        grads, lmd = grad_fn(state.params, state.apply_fn, sample, False, prng_key)
         grads = jax.lax.pmean(grads, axis_name='devices')
         state = state.apply_gradients(grads=grads)
         state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))

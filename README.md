@@ -38,7 +38,7 @@ import fpilot.trackers as tr
 # Create tracker instances.
 loss_metric_tracker_dict = {
     'lt': {'loss': tr.Mean()},
-    'mt': {'F1': tr.F1Score(threshold=0.6)}
+    'mt': {'F1': tr.F1Score(threshold=0.6, num_classes=10, average='macro')}
 }
 ```
 
