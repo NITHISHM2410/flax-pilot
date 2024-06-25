@@ -33,7 +33,7 @@ import optax as tx
 opt = tx.adam(0.0001)
 input_shape = {'x': (1, 28, 28, 1)}
 
-import fpilot.trackers as tr
+import fpilot.trackers.basic_trackers as tr
 
 # Create tracker instances.
 loss_metric_tracker_dict = {
@@ -60,8 +60,10 @@ def loss_fn(params, apply, sample, deterministic, det_key):
 ```
 
 ### Create Trainer instance
+
 ```python
-from fpilot.trainer import Trainer
+from fpilot.training.trainer import Trainer
+
 trainer = Trainer(CNN(), input_shape, optimizer, loss_fn, loss_metric_tracker_dict)
 ```
 

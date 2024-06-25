@@ -1,11 +1,12 @@
 import jax
+import numpy as np
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node
 
 
 class Mean:
     def __init__(self):
-        self.value = 0
+        self.value = 0.0
         self.count = 0
 
     def update(self, value):
@@ -16,7 +17,7 @@ class Mean:
         return self.value / (self.count + 1e-7)
 
     def reset(self):
-        self.value = 0
+        self.value = 0.0
         self.count = 0
 
     def flatten(self):
@@ -33,7 +34,7 @@ class Mean:
 
 class MeanMetric:
     def __init__(self):
-        self.value = 0
+        self.value = 0.0
         self.count = 0
 
     def update_value(self, value):
@@ -47,7 +48,7 @@ class MeanMetric:
         return self.value / (self.count + 1e-7)
 
     def reset(self):
-        self.value = 0
+        self.value = 0.0
         self.count = 0
 
     def flatten(self):
@@ -94,7 +95,10 @@ class ClassMetric:
         else:
             self.m_shape = ()
 
-        self.tp = self.tn = self.fp = self.fn = 0
+        self.tp = np.zeros(self.m_shape)
+        self.fp = np.zeros(self.m_shape)
+        self.fn = np.zeros(self.m_shape)
+        self.tn = np.zeros(self.m_shape)
         self.count = 0
 
     def update(self, true: jax.Array, pred: jax.Array):
@@ -106,7 +110,10 @@ class ClassMetric:
         self.count += 1
 
     def reset(self):
-        self.tp = self.tn = self.fp = self.fn = 0
+        self.tp = np.zeros(self.m_shape)
+        self.fp = np.zeros(self.m_shape)
+        self.fn = np.zeros(self.m_shape)
+        self.tn = np.zeros(self.m_shape)
         self.count = 0
 
     def flatten(self):

@@ -1,13 +1,16 @@
+import gc
 import jax
 import time
 import random
 import functools
+import optax as tx
 from tqdm import tqdm
 import jax.random as jr
 import jax.numpy as jnp
-from checkpoint import *
 from typing import Any, Union
+from mergedeep import merge as dmerge
 from flax.training import train_state
+from fpilot.checkpoints.checkpoint import *
 
 
 def get_prngs(num):
@@ -50,26 +53,37 @@ class Trainer:
         self.model = flax_model
         self.input_shape = input_shape
         self.loss_metric_fn = loss_metric_fn
+
         self.optimizer = optimizer
+        self.objs = ('main',)
+        if isinstance(self.optimizer, dict):
+            self.objs = list(self.optimizer.keys())
+
         self.trackers = trackers
         self.state = None
         self.build()
 
     def build(self, ):
-        for k in self.input_shape:
-            self.input_shape[k] = jnp.ones(self.input_shape[k])
+        for ip_shp in self.input_shape:
+            self.input_shape[ip_shp] = jnp.ones(self.input_shape[ip_shp])
+
+        def trace_to_obj_params(params):
+            obj_params = list(params['params'].keys())
+            assert set(obj_params) == set(self.objs), "Optimizer target params doesn't match the params of the model."
+            trace = {'params': dict([p, p] for p in obj_params)}
+            return trace
 
         param_key, global_key = get_prngs(2)
         state = FPState.create(
-            tx=self.optimizer,
+            tx=self.optimizer if not len(self.objs) > 1 else tx.multi_transform(self.optimizer, trace_to_obj_params),
             apply_fn=self.model.apply,
             params=self.model.init(param_key, deterministic=True, **self.input_shape),
             lm_trackers={'lt': self.trackers['lt'], 'mt': self.trackers['mt']},
             global_key=global_key
         )
-
-        self.state = state
-        self.state = replicate(self.state)
+        self.state = replicate(state)
+        if jax.device_count() > 1:
+            self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
 
     def __call__(self, rngs, tensor_inputs, method='__call__', **kwargs):
         """
@@ -93,8 +107,19 @@ class Trainer:
     @functools.partial(jax.pmap, axis_name='devices', static_broadcasted_argnums=(0,))
     def train_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, state.step)
-        grad_fn = jax.jacrev(self.loss_metric_fn, has_aux=True)
-        grads, lmd = grad_fn(state.params, state.apply_fn, sample, False, prng_key)
+        sub_grad_fn = jax.value_and_grad(self.loss_metric_fn, has_aux=True)
+
+        if len(self.objs) > 1:
+            grads = dict()
+            lmd = dict()
+            for obj in self.objs:
+                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step, obj)
+                sub_grads['params'] = {obj: sub_grads['params'][obj]}
+                grads = dmerge(grads, sub_grads)
+                lmd = dmerge(lmd, sub_lmd)
+        else:
+            (_, lmd), grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+
         grads = jax.lax.pmean(grads, axis_name='devices')
         state = state.apply_gradients(grads=grads)
         state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))
@@ -103,13 +128,21 @@ class Trainer:
     @functools.partial(jax.pmap, axis_name='devices', static_broadcasted_argnums=(0,))
     def val_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, -state.val_step)
-        loss, lmd = self.loss_metric_fn(state.params, state.apply_fn, sample, True, prng_key)
-        state = state.replace(val_step=state.val_step+1)
+
+        if len(self.objs) > 1:
+            lmd = dict()
+            for obj in self.objs:
+                _, sub_lmd = self.loss_metric_fn(state.params, state.apply_fn, sample, False, prng_key, state.step, obj)
+                lmd = dmerge(lmd, sub_lmd)
+        else:
+            _, lmd = self.loss_metric_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+
+        state = state.replace(val_step=state.val_step + 1)
         state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))
         return state
 
     @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
-    def metric_reset(self, state):
+    def tracker_reset(self, state):
         lf, mf = state.lm_trackers['lt'], state.lm_trackers['mt']
         for L in lf:
             lf[L].reset()
@@ -171,7 +204,7 @@ class Trainer:
         :param val_ds: validation tf.data.Dataset as numpy iterator.
         :param val_steps: steps per epoch for validation dataset.
         """
-        self.state = self.metric_reset(self.state)
+        self.state = self.tracker_reset(self.state)
         ST = time.time()
 
         for _ in range(val_steps):
@@ -197,7 +230,8 @@ class Trainer:
         for epoch in range(epochs):
 
             ################################################ TRAIN #####################################################
-            self.state = self.metric_reset(self.state)
+            gc.collect()
+            self.state = self.tracker_reset(self.state)
             ST = time.time()
 
             for _ in tqdm(range(t_steps), leave=True, position=0, desc="Epoch {0}".format(epoch + 1)):
@@ -233,3 +267,5 @@ class Trainer:
 
         """
         self.state = load_from_ckpt(step, save_dir, self.state, max2keep)
+        if jax.device_count() > 1:
+            self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
