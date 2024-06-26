@@ -1,13 +1,13 @@
-# Flax-Pilot
+# :airplane: Flax-Pilot
 
 Flax-Pilot aims to simplify the process of writing training loops for Google's Flax framework. As someone new to Flax, I started this project to deepen my understanding. This module represents a beginner's exploration into building
 efficient training workflows, emphasizing the need for further expertise to refine and expand its capabilities. Future plans include integrating multiple optimizer training, diverse metric modules, callbacks, and advancing towards more complex training
 loops, aiming to enhance its functionality and versatility. Flax-Pilot supports distributed training, ensuring scalability and efficiency across multiple devices.
 
 
-## How to use?
+## 🚀 How to Use?
 
-### Write a flax.linen module
+### 🛠️ Write a flax.linen Module
 
 ```python
 import flax.linen as nn
@@ -23,7 +23,7 @@ class CNN(nn.Module):
         return x
 ```
 
-### Define optimizer, input_shapes and dict of loss & metric trackers
+### 🔧 Define Optimizer, Input Shapes, and Dict of Loss & Metric Trackers
 *Loss trackers (**lt**) takes in **scalar loss** value and averages it throughout training.*<br>
 *Metric trackers (**mt**) takes in **y_true, y_pred** and computes metric score and averages throughout training.*<br>
 
@@ -42,7 +42,7 @@ loss_metric_tracker_dict = {
 }
 ```
 
-### Create loss_fn
+### 🧮 Create loss_fn
 A function that takes these certain params as written below in the code and returns scalar loss, dict of loss & metrics values.<br>
 
 Key names **lt**, **mt** shouldn't be changed anywhere, as training loops depend on those keys. Subkey names, **loss**, **F1** are free to be changed
@@ -59,7 +59,7 @@ def loss_fn(params, apply, sample, deterministic, det_key, step):
     return loss, loss_metric_value_dict
 ```
 
-### Create Trainer instance
+### 🏋️ Create Trainer Instance
 
 ```python
 from fpilot.training.trainer import Trainer
@@ -67,7 +67,7 @@ from fpilot.training.trainer import Trainer
 trainer = Trainer(CNN(), input_shape, optimizer, loss_fn, loss_metric_tracker_dict)
 ```
 
-### Train the model & eval
+### 📈 Train the Model & Evaluate
 ```python
 train_ds = ... # tf.data.Dataset as numpy iterator
 val_ds = ... # tf.data.Dataset as numpy iterator

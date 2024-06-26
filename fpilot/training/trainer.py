@@ -35,6 +35,10 @@ class Trainer:
 
         :param flax_model: An instance of flax model.
         :param input_shape: A dict with model's forward pass param's name as key and their shapes as value.
+                            The input_shape parameter is used for linen.module.init method, which initializes
+                            with float inputs by default. If integer inputs are desired, they must be manually
+                            converted to integers within the model call, because the model will always be init with float.
+
         :param optimizer: An optax optimizer.
         :param loss_metric_fn: A loss function that takes specific inputs and returns:
             (i) Scalar loss to minimized and
