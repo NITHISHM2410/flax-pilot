@@ -51,7 +51,7 @@ but must match across **loss_metric_tracker_dict** and **loss_metric_value_dict*
 import optax as tx
 
 # This fn's 1st return value is differentiated wrt the fn's first param.
-def loss_fn(params, apply, sample, deterministic, det_key):
+def loss_fn(params, apply, sample, deterministic, det_key, step):
     x, y = sample
     yp = apply(params, x, deterministic=deterministic, rngs={'dropout': det_key})
     loss = tx.softmax_cross_entropy(y, yp).mean()
