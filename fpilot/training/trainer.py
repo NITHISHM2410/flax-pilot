@@ -10,6 +10,7 @@ import jax.numpy as jnp
 from typing import Any, Union
 from mergedeep import merge as dmerge
 from flax.training import train_state
+from fpilot.opt_utils.freezer import freeze
 from fpilot.checkpoints.checkpoint import *
 
 
@@ -30,7 +31,7 @@ class FPState(train_state.TrainState):
 
 
 class Trainer:
-    def __init__(self, flax_model, input_shape, optimizer, loss_metric_fn, trackers):
+    def __init__(self, flax_model, input_shape, optimizer, loss_metric_fn, trackers, opt_mask=True):
         """
 
         :param flax_model: An instance of flax model.
@@ -39,7 +40,16 @@ class Trainer:
                             with float inputs by default. If integer inputs are desired, they must be manually
                             converted to integers within the model call, because the model will always be init with float.
 
-        :param optimizer: An optax optimizer.
+        :param optimizer:
+            - In single-objective training: It must be a single Optax optimizer. This optimizer is applied to
+              all the parameters to minimize the loss function.
+            - In multi-objective training (e.g., GANs): It must be a dictionary of optimizers. The keys of this
+              dictionary correspond to the parameter's key in the Flax `TrainState.params` that need to be optimized,
+              and the values are the respective Optax optimizers for those parameters. This allows different sets of
+              parameters to be optimized with different strategies.
+            - Nested dict can also be passed where the nested keys trace the path to the parameter's key whose children
+              are to be optimized and leaf of this nested dict is the optimizer.
+
         :param loss_metric_fn: A loss function that takes specific inputs and returns:
             (i) Scalar loss to minimized and
             (ii) Nested dict to update loss and metric trackers, with 'lt'(loss tracker) and 'mt'(metric tracker) as parent keys.
@@ -51,35 +61,85 @@ class Trainer:
         parent keys 'lt' and 'mt' shouldn't be changed, child key names can be set to anything, but must match
         between 'trackers' param and 'loss_metric_fn' 2nd return element.
 
+        :param opt_mask: A Pytree with similar structure of TrainState.params or its prefix with boolean leaves to
+                         indicate which params must be frozen and which must be trainable. True -> trainable
+                         and False -> frozen.
+                         Or Simply a boolean value to represent all the params.
 
 
         """
         self.model = flax_model
         self.input_shape = input_shape
         self.loss_metric_fn = loss_metric_fn
-
         self.optimizer = optimizer
-        self.objs = ('main',)
-        if isinstance(self.optimizer, dict):
-            self.objs = list(self.optimizer.keys())
-
         self.trackers = trackers
+        self.opt_mask = opt_mask
+        self.opt_trace = None
         self.state = None
+        self.objs = None
         self.build()
+
+    @staticmethod
+    def trace_to_obj_params(optimizer, opt_mask):
+        if isinstance(opt_mask, dict):
+            keys = list(opt_mask['params'].keys())
+            if isinstance(keys, bool):
+                opt_mask = keys
+
+        if isinstance(opt_mask, bool):
+            if opt_mask is False:
+                raise Exception("opt_mask is set to false, so whole model is frozen.")
+
+        if isinstance(optimizer, tx.GradientTransformation):
+            optimizer = {'params': optimizer}
+
+        if len(optimizer) == 1 and list(optimizer.keys())[0] == 'params':
+            return [['params', ], ], {'params': 'params'}, {'params': list(optimizer.values())[0]}, opt_mask
+
+        trace = {}
+        objs = []
+        flatten_optimizer = {}
+
+        def recursive_trace(path, result, obj_path):
+            for key, value in path.items():
+                if isinstance(value, dict):
+                    result[key] = {}
+                    obj_path.append(key)
+                    recursive_trace(value, result[key], obj_path)
+                    obj_path = ['params', ]
+
+                else:
+                    result[key] = key
+
+                    if isinstance(value, tx.GradientTransformation):
+                        obj_path.append(key)
+                        objs.append(obj_path)
+                        obj_path = ['params', ]
+                        flatten_optimizer[key] = path[key]
+
+                    else:
+                        raise Exception(
+                            "Leaves of optimizer dict must be optax.GradientTransformation instance or False(weights freeze)")
+
+        recursive_trace(optimizer, trace, ['params', ])
+        trace = {'params': trace}
+        return objs, trace, flatten_optimizer, opt_mask
 
     def build(self, ):
         for ip_shp in self.input_shape:
             self.input_shape[ip_shp] = jnp.ones(self.input_shape[ip_shp])
 
-        def trace_to_obj_params(params):
-            obj_params = list(params['params'].keys())
-            assert set(obj_params) == set(self.objs), "Optimizer target params doesn't match the params of the model."
-            trace = {'params': dict([p, p] for p in obj_params)}
-            return trace
-
+        self.objs, self.opt_trace, self.optimizer, self.opt_mask = self.trace_to_obj_params(self.optimizer,
+                                                                                            self.opt_mask)
         param_key, global_key = get_prngs(2)
+
+        optimizer = tx.multi_transform(self.optimizer, self.opt_trace)
+
+        # for backward compatibility
+        optimizer = freeze(optimizer, self.opt_mask) if isinstance(self.opt_mask, dict) else optimizer
+
         state = FPState.create(
-            tx=self.optimizer if not len(self.objs) > 1 else tx.multi_transform(self.optimizer, trace_to_obj_params),
+            tx=optimizer,
             apply_fn=self.model.apply,
             params=self.model.init(param_key, deterministic=True, **self.input_shape),
             lm_trackers={'lt': self.trackers['lt'], 'mt': self.trackers['mt']},
@@ -88,6 +148,24 @@ class Trainer:
         self.state = replicate(state)
         if jax.device_count() > 1:
             self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
+
+    def transfer_params(self, path, params):
+        """
+        Transfers the params from `params` to `path`.
+
+        :param path: Nested list where each inner list represents the path(dict keys) to the param in TrainState to be replaced.
+        :param params: List of replacement params where each param is replaced at the corresponding inner list in `path` .
+        """
+        new_params = self.state.params
+        params = iter(params)
+
+        for pth in path:
+            temp_cur_params = new_params
+            for p_i in pth[:-1]:
+                temp_cur_params = temp_cur_params[p_i]
+            temp_cur_params[pth[-1]] = replicate(next(params))
+
+        self.state = self.state.replace(params=new_params)
 
     def __call__(self, rngs, tensor_inputs, method='__call__', **kwargs):
         """
@@ -113,16 +191,23 @@ class Trainer:
         prng_key = jr.fold_in(state.global_key, state.step)
         sub_grad_fn = jax.value_and_grad(self.loss_metric_fn, has_aux=True)
 
-        if len(self.objs) > 1:
-            grads = dict()
-            lmd = dict()
-            for obj in self.objs:
-                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step, obj)
-                sub_grads['params'] = {obj: sub_grads['params'][obj]}
-                grads = dmerge(grads, sub_grads)
-                lmd = dmerge(lmd, sub_lmd)
-        else:
-            (_, lmd), grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+        grads = jax.tree_util.tree_map(jnp.zeros_like, state.params)
+        lmd = dict()
+
+        for obj in self.objs:
+            if len(self.objs) > 1:
+                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step,
+                                                      "_".join(obj[1:]))
+            else:
+                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+
+            path_grads = grads
+            for gp in obj[:-1]:
+                path_grads = path_grads[gp]
+                sub_grads = sub_grads[gp]
+
+            path_grads[obj[-1]] = sub_grads[obj[-1]]
+            lmd = dmerge(lmd, sub_lmd)
 
         grads = jax.lax.pmean(grads, axis_name='devices')
         state = state.apply_gradients(grads=grads)
@@ -133,13 +218,14 @@ class Trainer:
     def val_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, -state.val_step)
 
-        if len(self.objs) > 1:
-            lmd = dict()
-            for obj in self.objs:
-                _, sub_lmd = self.loss_metric_fn(state.params, state.apply_fn, sample, False, prng_key, state.step, obj)
-                lmd = dmerge(lmd, sub_lmd)
-        else:
-            _, lmd = self.loss_metric_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+        lmd = dict()
+        for obj in self.objs:
+            if len(self.objs) > 1:
+                _, sub_lmd, = self.loss_metric_fn(state.params, state.apply_fn, sample, True, prng_key, state.step,
+                                                  "_".join(obj[1:]))
+            else:
+                _, sub_lmd, = self.loss_metric_fn(state.params, state.apply_fn, sample, True, prng_key, state.step)
+            lmd = dmerge(lmd, sub_lmd)
 
         state = state.replace(val_step=state.val_step + 1)
         state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))
