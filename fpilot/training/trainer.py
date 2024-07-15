@@ -27,6 +27,7 @@ class FPState(train_state.TrainState):
         'mt': Any
     }
     global_key: jax.Array
+    variables: Any
     val_step: Union[int, jax.Array] = 0
 
 
@@ -138,13 +139,25 @@ class Trainer:
         # for backward compatibility
         optimizer = freeze(optimizer, self.opt_mask) if isinstance(self.opt_mask, dict) else optimizer
 
+        params = self.model.init(param_key, deterministic=True, **self.input_shape)
+
+        if len(params) == 1:
+            variables = {'variables': None}
+        else:
+            model_params = params['params']
+            del params['params']
+            variables = params
+            params, variables = {'params': model_params}, {'variables': variables}
+
         state = FPState.create(
             tx=optimizer,
             apply_fn=self.model.apply,
-            params=self.model.init(param_key, deterministic=True, **self.input_shape),
+            params=params,
             lm_trackers={'lt': self.trackers['lt'], 'mt': self.trackers['mt']},
-            global_key=global_key
+            global_key=global_key,
+            variables=variables
         )
+
         self.state = replicate(state)
         if jax.device_count() > 1:
             self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
@@ -155,8 +168,10 @@ class Trainer:
 
         :param path: Nested list where each inner list represents the path(dict keys) to the param in TrainState to be replaced.
         :param params: List of replacement params where each param is replaced at the corresponding inner list in `path` .
+
+        Note: Both model weights (params) and variables (batch norm states) can be included.
         """
-        new_params = self.state.params
+        new_params = self.state.params | self.state.variables
         params = iter(params)
 
         for pth in path:
@@ -165,7 +180,7 @@ class Trainer:
                 temp_cur_params = temp_cur_params[p_i]
             temp_cur_params[pth[-1]] = replicate(next(params))
 
-        self.state = self.state.replace(params=new_params)
+        self.state = self.state.replace(params={'params': new_params['params']}, variables={'variables': new_params['variables']})
 
     def __call__(self, rngs, tensor_inputs, method='__call__', **kwargs):
         """
@@ -181,25 +196,45 @@ class Trainer:
 
         @functools.partial(jax.pmap)
         def call(input_data, state):
+            if state.variables['variables'] is not None:
+                return state.apply_fn(state.params | state.variables['variables'], **input_data, method=method, rngs=rngs, **kwargs)
+
             return state.apply_fn(state.params, **input_data, method=method, rngs=rngs, **kwargs)
 
         output = call(tensor_inputs, self.state)
         return output
 
+    def compute_loss(self, *args):
+        loss_fn_returns = self.loss_metric_fn(*args)
+
+        if len(loss_fn_returns) == 2:
+            assert self.state.variables['variables'] is None, 'loss fn must return only loss and loss_metric_dict when model has no variables.'
+            loss, lmv = loss_fn_returns
+            aux_data = {'lmv': lmv, 'variables': None}
+            return loss, aux_data
+
+        if len(loss_fn_returns) == 3:
+            assert self.state.variables['variables'] is not None, 'loss fn must return loss, variables as a dict, loss_metric_dict when model has variables.'
+            loss, var, lmv = loss_fn_returns
+            aux_data = {'lmv': lmv, 'variables': var}
+            return loss, aux_data
+
+        raise Exception("loss fn must return <loss, tracker dict> or <loss, variables dict, tracker dict>.")
+
     @functools.partial(jax.pmap, axis_name='devices', static_broadcasted_argnums=(0,))
     def train_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, state.step)
-        sub_grad_fn = jax.value_and_grad(self.loss_metric_fn, has_aux=True)
+        sub_grad_fn = jax.value_and_grad(self.compute_loss, has_aux=True)
 
-        grads = jax.tree_util.tree_map(jnp.zeros_like, state.params)
-        lmd = dict()
+        aux_data = dict()
+        grads = jax.tree_util.tree_map(jnp.zeros_like, {'params': state.params['params']})
+        mul_obj = len(self.objs) > 1
+        model_args = (state.params, state.variables['variables']) if state.variables['variables'] is not None else (state.params,)
+        common_args = (state.apply_fn, sample, False, prng_key, state.step)
 
         for obj in self.objs:
-            if len(self.objs) > 1:
-                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step,
-                                                      "_".join(obj[1:]))
-            else:
-                (_, sub_lmd), sub_grads = sub_grad_fn(state.params, state.apply_fn, sample, False, prng_key, state.step)
+            common_args_mul_obj = common_args + ("_".join(obj[1:]),) if mul_obj else common_args
+            (_, sub_aux_data), sub_grads = sub_grad_fn(*model_args, *common_args_mul_obj)
 
             path_grads = grads
             for gp in obj[:-1]:
@@ -207,28 +242,32 @@ class Trainer:
                 sub_grads = sub_grads[gp]
 
             path_grads[obj[-1]] = sub_grads[obj[-1]]
-            lmd = dmerge(lmd, sub_lmd)
+            aux_data = dmerge(aux_data, sub_aux_data)
 
         grads = jax.lax.pmean(grads, axis_name='devices')
         state = state.apply_gradients(grads=grads)
-        state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))
+        state = state.replace(
+            variables={'variables': jax.lax.pmean(aux_data['variables'], axis_name='devices')}
+        )
+        state = state.replace(lm_trackers=self.update_met(state.lm_trackers, aux_data['lmv']))
         return state
 
     @functools.partial(jax.pmap, axis_name='devices', static_broadcasted_argnums=(0,))
     def val_step(self, state, sample):
         prng_key = jr.fold_in(state.global_key, -state.val_step)
 
-        lmd = dict()
+        aux_data = dict()
+        mul_obj = len(self.objs) > 1
+        model_args = (state.params, state.variables['variables']) if state.variables['variables'] is not None else (state.params,)
+        common_args = (state.apply_fn, sample, True, prng_key, state.step)
+
         for obj in self.objs:
-            if len(self.objs) > 1:
-                _, sub_lmd, = self.loss_metric_fn(state.params, state.apply_fn, sample, True, prng_key, state.step,
-                                                  "_".join(obj[1:]))
-            else:
-                _, sub_lmd, = self.loss_metric_fn(state.params, state.apply_fn, sample, True, prng_key, state.step)
-            lmd = dmerge(lmd, sub_lmd)
+            common_args_mul_obj = common_args + ("_".join(obj[1:]),) if mul_obj else common_args
+            _, sub_aux_data = self.compute_loss(*model_args, *common_args_mul_obj)
+            aux_data = dmerge(aux_data, sub_aux_data)
 
         state = state.replace(val_step=state.val_step + 1)
-        state = state.replace(lm_trackers=self.update_met(state.lm_trackers, lmd))
+        state = state.replace(lm_trackers=self.update_met(state.lm_trackers, aux_data['lmv']))
         return state
 
     @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
@@ -359,3 +398,5 @@ class Trainer:
         self.state = load_from_ckpt(step, save_dir, self.state, max2keep)
         if jax.device_count() > 1:
             self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
+
+
