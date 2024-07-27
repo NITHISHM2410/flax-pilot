@@ -1,5 +1,4 @@
-import orbax.checkpoint as ocp
-from flax.jax_utils import replicate, unreplicate
+from fpilot.checkpoints import replicate, unreplicate, ocp
 
 
 def new_manager(save_dir, max2keep):

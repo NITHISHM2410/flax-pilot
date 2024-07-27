@@ -1,0 +1,25 @@
+# Python bytecode files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# build and distribution
+build/
+dist/
+*.egg-info/
+
+#  IDE
+.idea/
+
+# temp
+*.log
+*.tmp
+*.swp
+*.swo
+*.DS_Store
+*.vscode/
+
+#  environment files
+venv/
+.env

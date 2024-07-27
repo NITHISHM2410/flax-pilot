@@ -1,34 +1,7 @@
-import gc
-import jax
-import time
-import random
-import functools
-import optax as tx
-from tqdm import tqdm
-import jax.random as jr
-import jax.numpy as jnp
-from typing import Any, Union
-from mergedeep import merge as dmerge
-from flax.training import train_state
+from fpilot.training import *
+from fpilot.checkpoints.checkpoint import load_from_ckpt, save_ckpt
 from fpilot.opt_utils.freezer import freeze
-from fpilot.checkpoints.checkpoint import *
-
-
-def get_prngs(num):
-    k = jr.PRNGKey(random.randint(1, 1000))
-    if num > 1:
-        return jr.split(k, num)
-    return k
-
-
-class FPState(train_state.TrainState):
-    lm_trackers: {
-        'lt': Any,
-        'mt': Any
-    }
-    global_key: jax.Array
-    variables: Any
-    val_step: Union[int, jax.Array] = 0
+from fpilot.common import time, tqdm, functools, dmerge, gc
 
 
 class Trainer:
@@ -180,7 +153,8 @@ class Trainer:
                 temp_cur_params = temp_cur_params[p_i]
             temp_cur_params[pth[-1]] = replicate(next(params))
 
-        self.state = self.state.replace(params={'params': new_params['params']}, variables={'variables': new_params['variables']})
+        self.state = self.state.replace(params={'params': new_params['params']},
+                                        variables={'variables': new_params['variables']})
 
     def __call__(self, rngs, tensor_inputs, method='__call__', **kwargs):
         """
@@ -398,5 +372,3 @@ class Trainer:
         self.state = load_from_ckpt(step, save_dir, self.state, max2keep)
         if jax.device_count() > 1:
             self.state = self.state.replace(global_key=get_prngs(jax.device_count()))
-
-

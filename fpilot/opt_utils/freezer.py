@@ -1,17 +1,4 @@
-from typing import Union, NamedTuple, Any
-from optax._src import base
-import jax.tree_util as jtu
-import jax.numpy as jnp
-
-
-class MaskedState(NamedTuple):
-    inner_state: Any
-
-
-class MaskedNode(NamedTuple):
-    """
-
-    """
+from fpilot.opt_utils import *
 
 
 def freeze(inner: base.GradientTransformation, mask: Union[base.PyTree]) -> base.GradientTransformationExtraArgs:
