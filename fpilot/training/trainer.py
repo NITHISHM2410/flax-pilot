@@ -264,6 +264,8 @@ class Trainer:
                 mf[M].update(*mv[M])
             elif isinstance(mv[M], dict):
                 mf[M].update(**mv[M])
+            else:
+                mf[M].update(mv[M])
 
         return {'lt': lf, 'mt': mf}
 
@@ -321,15 +323,15 @@ class Trainer:
         Executes training loop and performs validation after train loop.
 
         :param epochs: Number of epochs.
-        :param train_ds: Training tf.data.Dataset as numpy iterator.
-        :param val_ds:  Validation tf.data.Dataset as numpy iterator.
+        :param train_ds: Training Repeated tf.data.Dataset as numpy iterator.
+        :param val_ds:  Validation Repeated tf.data.Dataset as numpy iterator.
         :param t_steps: steps per epoch for training dataset.
         :param v_steps: steps per epoch for validation dataset.
         :param ckpt_dir: folder to save checkpoint during training. Set to None to disable checkpoint saving during training.
         :param max2keep: number of checkpoints to preserve in directory throughout training.
 
         """
-        train_ds, val_ds = iter(train_ds), iter(val_ds)
+
         for epoch in range(epochs):
 
             ################################################ TRAIN #####################################################
