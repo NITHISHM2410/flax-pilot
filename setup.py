@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='flax-pilot',
-    version='0.1.7',
+    version='0.1.11',
     author='Nithish M',
     author_email='nithishm2206@gmail.com',
     description='A Simplistic trainer for Flax',
@@ -11,8 +11,8 @@ setup(
     url='https://github.com/NITHISHM2410/flax-pilot',
     packages=find_packages(include=['fpilot', 'fpilot.*']),
     install_requires=[
+        'jax[cuda12]>=0.4.26',
         'flax>=0.8.4',
-        'jax>=0.4.26',
         'optax',
         'numpy',
         'tqdm',

@@ -112,7 +112,10 @@ class Trainer:
         # for backward compatibility
         optimizer = freeze(optimizer, self.opt_mask) if isinstance(self.opt_mask, dict) else optimizer
 
-        params = self.model.init(param_key, deterministic=True, **self.input_shape)
+        @jax.jit
+        def init(ip_shapes):
+            return self.model.init(param_key, deterministic=True, **ip_shapes)
+        params = init(self.input_shape)
 
         if len(params) == 1:
             variables = {'variables': None}
@@ -122,14 +125,17 @@ class Trainer:
             variables = params
             params, variables = {'params': model_params}, {'variables': variables}
 
-        state = FPState.create(
-            tx=optimizer,
-            apply_fn=self.model.apply,
-            params=params,
-            lm_trackers={'lt': self.trackers['lt'], 'mt': self.trackers['mt']},
-            global_key=global_key,
-            variables=variables
-        )
+        @jax.jit
+        def state_init(p):
+            return FPState.create(
+                tx=optimizer,
+                apply_fn=self.model.apply,
+                params=p,
+                lm_trackers={'lt': self.trackers['lt'], 'mt': self.trackers['mt']},
+                global_key=global_key,
+                variables=variables
+            )
+        state = state_init(params)
 
         self.state = replicate(state)
         if jax.device_count() > 1:
