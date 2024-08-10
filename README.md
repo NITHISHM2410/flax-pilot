@@ -78,6 +78,11 @@ ckpt_path = "/saved/model/model_1"  # If set to None, no checkpoints will be sav
 trainer.train(epochs, train_ds, val_ds, train_steps, val_steps, ckpt_path)
 ```
 
+## What's next?
+- Seperate package for TPU.
+- Callbacks.
+- TensorBoard logging.
+
 ## Demo
 Review the 'examples' folder for training tutorials. The `vae-gan-cfg-using-pretrained` notebook demonstrates how to use 
 the trainer as a Python package, while the other notebooks show how to use the trainer with git clone. 
