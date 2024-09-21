@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='flax-pilot',
-    version='0.1.11',
+    version='0.1.13',
     author='Nithish M',
     author_email='nithishm2206@gmail.com',
     description='A Simplistic trainer for Flax',

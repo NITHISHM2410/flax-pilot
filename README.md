@@ -4,7 +4,7 @@ Flax-Pilot aims to simplify the process of writing training loops for Google's F
 efficient training workflows, emphasizing the need for further expertise to refine and expand its capabilities. Future plans include integrating multiple optimizer training, diverse metric modules, callbacks, and advancing towards more complex training
 loops, aiming to enhance its functionality and versatility. Flax-Pilot supports distributed training, ensuring scalability and efficiency across multiple devices.
 
-**As of 27-7-2024, the trainer is available as package [![PyPI version](https://img.shields.io/pypi/v/flax-pilot.svg)](https://pypi.org/project/flax-pilot/) for GPU and [![PyPI version](https://img.shields.io/pypi/v/flax-pilot-cpu.svg)](https://pypi.org/project/flax-pilot-cpu/) for CPU.**
+**As of 27-7-2024, the trainer is available as package [![PyPI version](https://img.shields.io/pypi/v/flax-pilot.svg)](https://pypi.org/project/flax-pilot/) for GPU & CPU.**
 
 ## How to Use?
 
