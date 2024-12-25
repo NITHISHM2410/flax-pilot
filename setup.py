@@ -1,8 +1,9 @@
 from setuptools import setup, find_packages
 
+
 setup(
     name='flax-pilot',
-    version='0.1.13',
+    version='0.2.3',
     author='Nithish M',
     author_email='nithishm2206@gmail.com',
     description='A Simplistic trainer for Flax',
@@ -11,19 +12,17 @@ setup(
     url='https://github.com/NITHISHM2410/flax-pilot',
     packages=find_packages(include=['fpilot', 'fpilot.*']),
     install_requires=[
-        'jax[cuda12]>=0.4.26',
-        'flax>=0.8.4',
-        'optax',
+        "jax[cuda12]==0.4.37",
+        'flax>=0.10.2',
+        'optax>=0.2.4',
         'numpy',
         'tqdm',
         'mergedeep',
-        'typing',
-        'orbax-checkpoint>=0.5.15',
+        'orbax-checkpoint>=0.5.20',
     ],
     classifiers=[
-        'Programming Language :: Python :: 3',
+        "Programming Language :: Python :: 3.10",
         'License :: OSI Approved :: MIT License',
-        'Operating System :: OS Independent',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.10',
 )

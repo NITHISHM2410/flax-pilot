@@ -1,4 +1,4 @@
-from fpilot.checkpoints import replicate, unreplicate, ocp
+from fpilot.utils.common_utils import replicate, unreplicate, ocp
 
 
 def new_manager(save_dir, max2keep):

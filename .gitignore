@@ -12,6 +12,7 @@ dist/
 #  IDE
 .idea/
 
+
 # temp
 *.log
 *.tmp
@@ -19,6 +20,7 @@ dist/
 *.swo
 *.DS_Store
 *.vscode/
+*.ipynb
 
 #  environment files
 venv/

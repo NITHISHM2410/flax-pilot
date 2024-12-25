@@ -34,7 +34,7 @@ import optax as tx
 opt = tx.adam(0.0001)
 input_shape = {'x': (1, 28, 28, 1)}
 
-from fpilot import BasicTrackers as tr
+from fpilot import Trackers as tr
 
 # Create tracker instances.
 loss_metric_tracker_dict = {
@@ -44,7 +44,7 @@ loss_metric_tracker_dict = {
 ```
 
 ### 🧮 Create loss_fn
-A function that takes these certain params as written below in the code and returns scalar loss, dict of loss & metrics values.<br>
+A function that takes these certain params as written below in the code and returns scalar loss, dict of loss, mutable variables and tracker updates.<br>
 
 Key names **lt**, **mt** shouldn't be changed anywhere, as training loops depend on those keys. Subkey names, **loss**, **F1** are free to be changed
 but must match across **loss_metric_tracker_dict** and **loss_metric_value_dict**.<br>
@@ -52,12 +52,16 @@ but must match across **loss_metric_tracker_dict** and **loss_metric_value_dict*
 import optax as tx
 
 # This fn's 1st return value is differentiated wrt the fn's first param.
-def loss_fn(params, apply, sample, deterministic, det_key, step):
+def loss_fn(params, mut_variables, apply, sample, deterministic, det_key, step, objective):
     x, y = sample
     yp = apply(params, x, deterministic=deterministic, rngs={'dropout': det_key})
+    
+    # No mutable vars in this model so,
+    mut_variables = {}
+    
     loss = tx.softmax_cross_entropy(y, yp).mean()
     loss_metric_value_dict = {'lt': {'loss': loss}, 'mt': {'F1': (y, yp)}}
-    return loss, loss_metric_value_dict
+    return loss, mut_variables, loss_metric_value_dict
 ```
 
 ### 🏋️ Create Trainer Instance
@@ -84,7 +88,5 @@ trainer.train(epochs, train_ds, val_ds, train_steps, val_steps, ckpt_path)
 - TensorBoard logging.
 
 ## Demo
-Review the 'examples' folder for training tutorials. The `vae-gan-cfg-using-pretrained` notebook demonstrates how to use 
-the trainer as a Python package, while the other notebooks show how to use the trainer with git clone. 
-Therefore, see the vae-gan-cfg-using-pretrained for a more simpler training.
+Demo notebooks will be available in `code` section [here](https://www.kaggle.com/nithishm2410).
 

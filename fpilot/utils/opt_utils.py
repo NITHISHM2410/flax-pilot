@@ -1,7 +1,19 @@
-from fpilot.opt_utils import *
+from fpilot.utils.common_utils import typing as tp, jtu, jnp, tx
+from optax._src import base
 
 
-def freeze(inner: base.GradientTransformation, mask: Union[base.PyTree]) -> base.GradientTransformationExtraArgs:
+
+class MaskedState(tp.NamedTuple):
+    inner_state: tp.Any
+
+
+class MaskedNode(tp.NamedTuple):
+    """
+
+    """
+
+
+def freeze(inner: base.GradientTransformation, mask: tp.Union[base.PyTree]) -> base.GradientTransformationExtraArgs:
     def mask_pytree(pytree, mask_tree):
         return jtu.tree_map(lambda m, p: p if m else MaskedNode(), mask_tree, pytree)
 
