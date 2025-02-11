@@ -116,6 +116,25 @@ class Trainer:
                     devices:
                         List of `jax.Device`, indicating across which devices should training be distributed. Default value `None` indicates all devices.
 
+                    opt_mask:
+                         - A Pytree with similar structure of TrainState.params or its prefix with boolean leaves to
+                         indicate which params must be frozen and which must be trainable. True -> trainable
+                         and False -> frozen (Or) Simply a boolean value to represent all the params.
+                            >>> # Example opt_mask for transfer learning classification
+                            ... opt_mask = {
+                            ...     'params': {
+                            ...         'resnet_base': False,
+                            ...         'dense': True
+                            ...     }
+                            ... }
+                            ... # Example opt_mask for training that doesn't require freezing any params
+                            ... opt_mask = True # default value
+
+
+                        - 'generator' and 'discriminator' are the sub-model names in the encapsulated model.
+                        - 'params` is the mandatory key for any `opt_mask`.
+
+
 
                 """
 
