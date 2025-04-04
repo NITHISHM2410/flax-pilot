@@ -44,9 +44,9 @@ loss_metric_tracker_dict = {
 ```
 
 ### 🧮 Create loss_fn
-A function that takes these certain params as written below in the code and returns scalar loss, dict of loss, mutable variables and tracker updates.<br>
+A function that takes these certain params as written below in the code and returns scalar loss, mutable variables and tracker updates.<br>
 
-Key names **lt**, **mt** shouldn't be changed anywhere, as training loops depend on those keys. Subkey names, **loss**, **F1** are free to be changed
+Key names **lt**, **mt** in `loss_metric_value_dict` and `loss_metric_tracker_dict`(*mentioned in next section*) shouldn't be changed anywhere, as training loops depend on those keys. Subkey names, **loss**, **F1** are free to be changed
 but must match across **loss_metric_tracker_dict** and **loss_metric_value_dict**.<br>
 ```python
 import optax as tx
